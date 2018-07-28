@@ -1,0 +1,31 @@
+{
+  "name": "eslint-server",
+  "version": "0.1.0",
+  "description": "language server for eslint",
+  "main": "lib/index.js",
+  "keywords": [
+    "eslint",
+    "languageserver"
+  ],
+  "scripts": {
+    "clean": "rimraf lib",
+    "lint": "tslint -c tslint.json -p .",
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -p tsconfig.json --watch true --sourceMap",
+    "prepublish": "npm run clean && npm run build"
+  },
+  "author": "Qiming Zhao <chemzqm@gmail.com>",
+  "license": "MIT",
+  "devDependencies": {
+    "@chemzqm/tsconfig": "^0.0.2",
+    "@chemzqm/tslint-config": "^1.0.15",
+    "@types/node": "^10.5.3",
+    "rimraf": "^2.6.2",
+    "typescript": "^2.9.2"
+  },
+  "dependencies": {
+    "tslib": "^1.9.3",
+    "vscode-languageserver": "^4.4.0",
+    "vscode-uri": "^1.0.5"
+  }
+}
