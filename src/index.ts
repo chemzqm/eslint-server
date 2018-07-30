@@ -703,6 +703,10 @@ function validate(document: TextDocument, settings: TextDocumentSettings, publis
         }
       }
     }
+    if (settings.library.CLIEngine == null) {
+      console.error('eslint module not found')
+      return
+    }
 
     let cli = new settings.library.CLIEngine(newOptions)
     // Clean previously computed code actions.
