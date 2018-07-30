@@ -1,6 +1,6 @@
 {
   "name": "eslint-server",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "language server for eslint",
   "main": "lib/index.js",
   "keywords": [

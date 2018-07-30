@@ -389,7 +389,9 @@ function resolveSettings(document: TextDocument): Thenable<TextDocumentSettings>
         if (!library.CLIEngine) {
           connection.console.error(`The eslint library loaded from ${path} doesn\'t export a CLIEngine. You need at least eslint@1.0.0`)
         } else {
-          connection.console.info(`ESLint library loaded from: ${path}`)
+          let msg = `ESLint library loaded from: ${path}`
+          connection.window.showInformationMessage(msg)
+          connection.console.info(msg)
           settings.library = library
         }
         path2Library.set(path, library)
