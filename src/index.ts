@@ -2,18 +2,41 @@
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License. See License.txt in the project root for license information.
  * ------------------------------------------------------------------------------------------ */
+'use strict'
+
 import {
-  createConnection, IConnection,
-  ResponseError, RequestType, NotificationType, ErrorCodes,
-  RequestHandler, NotificationHandler,
-  Diagnostic, DiagnosticSeverity, Range, Files, CancellationToken,
-  TextDocuments, TextDocument, TextDocumentSyncKind, TextEdit, TextDocumentIdentifier,
-  Command, WorkspaceChange,
-  CodeActionRequest, VersionedTextDocumentIdentifier,
-  ExecuteCommandRequest, DidChangeWatchedFilesNotification, DidChangeConfigurationNotification, CodeAction, CodeActionKind
+  createConnection,
+  IConnection,
+  ResponseError,
+  RequestType,
+  NotificationType,
+  ErrorCodes,
+  RequestHandler,
+  NotificationHandler,
+  Diagnostic,
+  DiagnosticSeverity,
+  Range,
+  Files,
+  CancellationToken,
+  TextDocuments,
+  TextDocument,
+  TextDocumentSyncKind,
+  TextEdit,
+  TextDocumentIdentifier,
+  TextDocumentSaveReason,
+  Command,
+  WorkspaceChange,
+  CodeActionRequest,
+  VersionedTextDocumentIdentifier,
+  ExecuteCommandRequest,
+  DidChangeWatchedFilesNotification,
+  DidChangeConfigurationNotification,
+  WorkspaceFolder,
+  DidChangeWorkspaceFoldersNotification,
+  CodeAction,
+  CodeActionKind
 } from 'vscode-languageserver'
-import {resolveLocalConfig} from './util'
-import os from 'os'
+
 import URI from 'vscode-uri'
 import * as path from 'path'
 
@@ -30,10 +53,10 @@ namespace Is {
 }
 
 namespace CommandIds {
-  export const applySingleFix = '_eslint.applySingleFix'
-  export const applySameFixes = '_eslint.applySameFixes'
-  export const applyAllFixes = '_eslint.applyAllFixes'
-  export const applyAutoFix = '_eslint.applyAutoFix'
+  export const applySingleFix: string = 'eslint.applySingleFix'
+  export const applySameFixes: string = 'eslint.applySameFixes'
+  export const applyAllFixes: string = 'eslint.applyAllFixes'
+  export const applyAutoFix: string = 'eslint.applyAutoFix'
 }
 
 interface ESLintError extends Error {
@@ -62,22 +85,30 @@ interface NoConfigParams {
   document: TextDocumentIdentifier
 }
 
-interface NoConfigResult {
-}
+interface NoConfigResult {}
 
 namespace NoConfigRequest {
-  export const type = new RequestType<NoConfigParams, NoConfigResult, void, void>('eslint/noConfig')
+  export const type = new RequestType<
+    NoConfigParams,
+    NoConfigResult,
+    void,
+    void
+  >('eslint/noConfig')
 }
 
 interface NoESLintLibraryParams {
   source: TextDocumentIdentifier
 }
 
-interface NoESLintLibraryResult {
-}
+interface NoESLintLibraryResult {}
 
 namespace NoESLintLibraryRequest {
-  export const type = new RequestType<NoESLintLibraryParams, NoESLintLibraryResult, void, void>('eslint/noLibrary')
+  export const type = new RequestType<
+    NoESLintLibraryParams,
+    NoESLintLibraryResult,
+    void,
+    void
+  >('eslint/noLibrary')
 }
 
 type RunValues = 'onType' | 'onSave'
@@ -90,17 +121,24 @@ interface DirectoryItem {
 namespace DirectoryItem {
   export function is(item: any): item is DirectoryItem {
     let candidate = item as DirectoryItem
-    return candidate && Is.string(candidate.directory) && (Is.boolean(candidate.changeProcessCWD) || candidate.changeProcessCWD === void 0)
+    return (
+      candidate &&
+      Is.string(candidate.directory) &&
+      (Is.boolean(candidate.changeProcessCWD) ||
+        candidate.changeProcessCWD === void 0)
+    )
   }
 }
 
 interface TextDocumentSettings {
+  validate: boolean
   packageManager: 'npm' | 'yarn'
   autoFix: boolean
   autoFixOnSave: boolean
   options: any | undefined
   run: RunValues
   nodePath: string | undefined
+  workspaceFolder: WorkspaceFolder | undefined
   workingDirectory: DirectoryItem | undefined
   library: ESLintModule | undefined
   resolvedGlobalPackageManagerPath: string | undefined
@@ -145,7 +183,7 @@ interface CLIEngine {
 }
 
 interface CLIEngineConstructor {
-  new(options: CLIOptions): CLIEngine
+  new (options: CLIOptions): CLIEngine
 }
 
 interface ESLintModule {
@@ -153,15 +191,18 @@ interface ESLintModule {
 }
 
 function makeDiagnostic(problem: ESLintProblem): Diagnostic {
-  let message = (problem.ruleId != null)
-    ? `${problem.message} (${problem.ruleId})`
-    : `${problem.message}`
+  let message =
+    problem.ruleId != null
+      ? `${problem.message} (${problem.ruleId})`
+      : `${problem.message}`
   let startLine = Math.max(0, problem.line - 1)
   let startChar = Math.max(0, problem.column - 1)
-  let endLine = problem.endLine != null ? Math.max(0, problem.endLine - 1) : startLine
-  let endChar = problem.endColumn != null ? Math.max(0, problem.endColumn - 1) : startChar
+  let endLine =
+    problem.endLine != null ? Math.max(0, problem.endLine - 1) : startLine
+  let endChar =
+    problem.endColumn != null ? Math.max(0, problem.endColumn - 1) : startChar
   return {
-    message,
+    message: message,
     severity: convertSeverity(problem.severity),
     source: 'eslint',
     range: {
@@ -181,11 +222,20 @@ interface AutoFix {
 
 function computeKey(diagnostic: Diagnostic): string {
   let range = diagnostic.range
-  return `[${range.start.line},${range.start.character},${range.end.line},${range.end.character}]-${diagnostic.code}`
+  return `[${range.start.line},${range.start.character},${range.end.line},${
+    range.end.character
+  }]-${diagnostic.code}`
 }
 
-let codeActions: Map<string, Map<string, AutoFix>> = new Map<string, Map<string, AutoFix>>()
-function recordCodeAction(document: TextDocument, diagnostic: Diagnostic, problem: ESLintProblem): void {
+let codeActions: Map<string, Map<string, AutoFix>> = new Map<
+  string,
+  Map<string, AutoFix>
+>()
+function recordCodeAction(
+  document: TextDocument,
+  diagnostic: Diagnostic,
+  problem: ESLintProblem
+): void {
   if (!problem.fix || !problem.ruleId) {
     return
   }
@@ -195,7 +245,12 @@ function recordCodeAction(document: TextDocument, diagnostic: Diagnostic, proble
     edits = new Map<string, AutoFix>()
     codeActions.set(uri, edits)
   }
-  edits.set(computeKey(diagnostic), {label: `Fix this ${problem.ruleId} problem`, documentVersion: document.version, ruleId: problem.ruleId, edit: problem.fix})
+  edits.set(computeKey(diagnostic), {
+    label: `Fix this ${problem.ruleId} problem`,
+    documentVersion: document.version,
+    ruleId: problem.ruleId,
+    edit: problem.fix
+  })
 }
 
 function convertSeverity(severity: number): DiagnosticSeverity {
@@ -211,10 +266,10 @@ function convertSeverity(severity: number): DiagnosticSeverity {
 }
 
 const enum CharCode {
-	/**
-	 * The `\` character.
-	 */
-  Backslash = 92,
+  /**
+   * The `\` character.
+   */
+  Backslash = 92
 }
 
 /**
@@ -277,14 +332,18 @@ function getFilePath(documentOrUri: string | TextDocument): string {
   if (!documentOrUri) {
     return undefined
   }
-  let uri = Is.string(documentOrUri) ? URI.parse(documentOrUri) : URI.parse(documentOrUri.uri)
+  let uri = Is.string(documentOrUri)
+    ? URI.parse(documentOrUri)
+    : URI.parse(documentOrUri.uri)
   if (uri.scheme !== 'file') {
     return undefined
   }
   return getFileSystemPath(uri)
 }
 
-const exitCalled = new NotificationType<[number, string], void>('eslint/exitCalled')
+const exitCalled = new NotificationType<[number, string], void>(
+  'eslint/exitCalled'
+)
 
 const nodeExit = process.exit
 process.exit = ((code?: number): void => {
@@ -312,17 +371,14 @@ process.on('uncaughtException', (error: any) => {
       }
     }
   }
-  // tslint:disable-next-line:no-console
+  console.error('Uncaught exception recevied.')
   if (message) {
-    // tslint:disable-next-line:no-console
     console.error(message)
   }
 })
 
 let connection = createConnection()
 let documents: TextDocuments = new TextDocuments()
-console.log = connection.console.log.bind(connection.console)
-console.error = connection.console.error.bind(connection.console)
 
 let _globalNpmPath: string | null | undefined
 function globalNpmPath(): string {
@@ -351,59 +407,99 @@ function globalYarnPath(): string {
   return _globalYarnPath
 }
 let path2Library: Map<string, ESLintModule> = new Map<string, ESLintModule>()
-let document2Settings: Map<string, Thenable<TextDocumentSettings>> = new Map<string, Thenable<TextDocumentSettings>>()
+let document2Settings: Map<string, Thenable<TextDocumentSettings>> = new Map<
+  string,
+  Thenable<TextDocumentSettings>
+>()
 
-function resolveSettings(document: TextDocument): Thenable<TextDocumentSettings> {
+function resolveSettings(
+  document: TextDocument
+): Thenable<TextDocumentSettings> {
   let uri = document.uri
   let resultPromise = document2Settings.get(uri)
   if (resultPromise) {
     return resultPromise
   }
-
-  resultPromise = connection.workspace.getConfiguration({scopeUri: uri, section: ''}).then((settings: TextDocumentSettings) => {
-    if (settings.packageManager === 'npm') {
-      settings.resolvedGlobalPackageManagerPath = globalNpmPath()
-    } else if (settings.packageManager === 'yarn') {
-      settings.resolvedGlobalPackageManagerPath = globalYarnPath()
-    }
-    let uri = URI.parse(document.uri)
-    let promise: Thenable<string>
-    if (uri.scheme === 'file') {
-      let file = uri.fsPath
-      let directory = path.dirname(file)
-      let localConfig = resolveLocalConfig(directory)
-      if (settings.nodePath) {
-        let nodePath = settings.nodePath
-        promise = Files.resolve('eslint', nodePath, nodePath, trace).then<string, string>(undefined, () => {
-          return Files.resolve('eslint', settings.resolvedGlobalPackageManagerPath, directory, trace)
-        })
-      } else {
-        let dir = localConfig ? directory : os.homedir()
-        promise = Files.resolve('eslint', settings.resolvedGlobalPackageManagerPath, dir, trace)
+  resultPromise = connection.workspace
+    .getConfiguration({scopeUri: uri, section: ''})
+    .then((settings: TextDocumentSettings) => {
+      if (settings.packageManager === 'npm') {
+        settings.resolvedGlobalPackageManagerPath = globalNpmPath()
+      } else if (settings.packageManager === 'yarn') {
+        settings.resolvedGlobalPackageManagerPath = globalYarnPath()
       }
-    }
-    return promise.then(path => {
-      let library = path2Library.get(path)
-      if (!library) {
-        library = require(path)
-        if (!library.CLIEngine) {
-          connection.console.error(`The eslint library loaded from ${path} doesn\'t export a CLIEngine. You need at least eslint@1.0.0`)
+      let uri = URI.parse(document.uri)
+      let promise: Thenable<string>
+      if (uri.scheme === 'file') {
+        let file = uri.fsPath
+        let directory = path.dirname(file)
+        if (settings.nodePath) {
+          let nodePath = settings.nodePath
+          if (
+            !path.isAbsolute(nodePath) &&
+            settings.workspaceFolder !== void 0
+          ) {
+            let uri = URI.parse(settings.workspaceFolder.uri)
+            if (uri.scheme === 'file') {
+              nodePath = path.join(uri.fsPath, nodePath)
+            }
+          }
+          promise = Files.resolve('eslint', nodePath, nodePath, trace).then<
+            string,
+            string
+          >(undefined, () => {
+            return Files.resolve(
+              'eslint',
+              settings.resolvedGlobalPackageManagerPath,
+              directory,
+              trace
+            )
+          })
         } else {
-          let msg = `ESLint library loaded from: ${path}`
-          connection.window.showInformationMessage(msg)
-          connection.console.info(msg)
-          settings.library = library
+          promise = Files.resolve(
+            'eslint',
+            settings.resolvedGlobalPackageManagerPath,
+            directory,
+            trace
+          )
         }
-        path2Library.set(path, library)
       } else {
-        settings.library = library
+        promise = Files.resolve(
+          'eslint',
+          settings.resolvedGlobalPackageManagerPath,
+          settings.workspaceFolder ? settings.workspaceFolder.uri : undefined,
+          trace
+        )
       }
-      return settings
-    }, () => {
-      connection.sendRequest(NoESLintLibraryRequest.type, {source: {uri: document.uri}})
-      return settings
+      return promise.then(
+        path => {
+          let library = path2Library.get(path)
+          if (!library) {
+            library = require(path)
+            if (!library.CLIEngine) {
+              settings.validate = false
+              connection.console.error(
+                `The eslint library loaded from ${path} doesn\'t export a CLIEngine. You need at least eslint@1.0.0`
+              )
+            } else {
+              connection.console.info(`ESLint library loaded from: ${path}`)
+              settings.library = library
+            }
+            path2Library.set(path, library)
+          } else {
+            settings.library = library
+          }
+          return settings
+        },
+        () => {
+          settings.validate = false
+          connection.sendRequest(NoESLintLibraryRequest.type, {
+            source: {uri: document.uri}
+          })
+          return settings
+        }
+      )
     })
-  })
   document2Settings.set(uri, resultPromise)
   return resultPromise
 }
@@ -420,7 +516,12 @@ interface Request<P, R> {
 namespace Request {
   export function is(value: any): value is Request<any, any> {
     let candidate: Request<any, any> = value
-    return candidate && !!candidate.token && !!candidate.resolve && !!candidate.reject
+    return (
+      candidate &&
+      !!candidate.token &&
+      !!candidate.resolve &&
+      !!candidate.reject
+    )
   }
 }
 
@@ -432,7 +533,9 @@ interface Notifcation<P> {
 
 type Message<P, R> = Notifcation<P> | Request<P, R>
 
-type VersionProvider<P> = (params: P) => number
+interface VersionProvider<P> {
+  (params: P): number
+}
 
 namespace Thenable {
   export function is<T>(value: any): value is Thenable<T> {
@@ -442,10 +545,18 @@ namespace Thenable {
 }
 
 class BufferedMessageQueue {
-
   private queue: Message<any, any>[]
-  private requestHandlers: Map<string, {handler: RequestHandler<any, any, any>, versionProvider?: VersionProvider<any>}>
-  private notificationHandlers: Map<string, {handler: NotificationHandler<any>, versionProvider?: VersionProvider<any>}>
+  private requestHandlers: Map<
+    string,
+    {
+      handler: RequestHandler<any, any, any>
+      versionProvider?: VersionProvider<any>
+    }
+  >
+  private notificationHandlers: Map<
+    string,
+    {handler: NotificationHandler<any>; versionProvider?: VersionProvider<any>}
+  >
   private timer: NodeJS.Timer | undefined
 
   constructor(private connection: IConnection) {
@@ -454,16 +565,22 @@ class BufferedMessageQueue {
     this.notificationHandlers = new Map()
   }
 
-  public registerRequest<P, R, E, RO>(type: RequestType<P, R, E, RO>, handler: RequestHandler<P, R, E>, versionProvider?: VersionProvider<P>): void {
+  public registerRequest<P, R, E, RO>(
+    type: RequestType<P, R, E, RO>,
+    handler: RequestHandler<P, R, E>,
+    versionProvider?: VersionProvider<P>
+  ): void {
     this.connection.onRequest(type, (params, token) => {
       return new Promise<R>((resolve, reject) => {
         this.queue.push({
           method: type.method,
-          params,
-          documentVersion: versionProvider ? versionProvider(params) : undefined,
-          resolve,
-          reject,
-          token
+          params: params,
+          documentVersion: versionProvider
+            ? versionProvider(params)
+            : undefined,
+          resolve: resolve,
+          reject: reject,
+          token: token
         })
         this.trigger()
       })
@@ -471,19 +588,27 @@ class BufferedMessageQueue {
     this.requestHandlers.set(type.method, {handler, versionProvider})
   }
 
-  public registerNotification<P, RO>(type: NotificationType<P, RO>, handler: NotificationHandler<P>, versionProvider?: (params: P) => number): void {
+  public registerNotification<P, RO>(
+    type: NotificationType<P, RO>,
+    handler: NotificationHandler<P>,
+    versionProvider?: (params: P) => number
+  ): void {
     connection.onNotification(type, params => {
       this.queue.push({
         method: type.method,
-        params,
-        documentVersion: versionProvider ? versionProvider(params) : undefined,
+        params: params,
+        documentVersion: versionProvider ? versionProvider(params) : undefined
       })
       this.trigger()
     })
     this.notificationHandlers.set(type.method, {handler, versionProvider})
   }
 
-  public addNotificationMessage<P, RO>(type: NotificationType<P, RO>, params: P, version: number): void {
+  public addNotificationMessage<P, RO>(
+    type: NotificationType<P, RO>,
+    params: P,
+    version: number
+  ) {
     this.queue.push({
       method: type.method,
       params,
@@ -492,7 +617,11 @@ class BufferedMessageQueue {
     this.trigger()
   }
 
-  public onNotification<P, RO>(type: NotificationType<P, RO>, handler: NotificationHandler<P>, versionProvider?: (params: P) => number): void {
+  public onNotification<P, RO>(
+    type: NotificationType<P, RO>,
+    handler: NotificationHandler<P>,
+    versionProvider?: (params: P) => number
+  ): void {
     this.notificationHandlers.set(type.method, {handler, versionProvider})
   }
 
@@ -514,28 +643,51 @@ class BufferedMessageQueue {
     if (Request.is(message)) {
       let requestMessage = message
       if (requestMessage.token.isCancellationRequested) {
-        requestMessage.reject(new ResponseError(ErrorCodes.RequestCancelled, 'Request got cancelled')) // tslint:disable-line
+        requestMessage.reject(
+          new ResponseError(
+            ErrorCodes.RequestCancelled,
+            'Request got cancelled'
+          )
+        )
         return
       }
       let elem = this.requestHandlers.get(requestMessage.method)
-      if (elem.versionProvider && requestMessage.documentVersion !== void 0 && requestMessage.documentVersion !== elem.versionProvider(requestMessage.params)) {
-        requestMessage.reject(new ResponseError(ErrorCodes.RequestCancelled, 'Request got cancelled')) // tslint:disable-line
+      if (
+        elem.versionProvider &&
+        requestMessage.documentVersion !== void 0 &&
+        requestMessage.documentVersion !==
+          elem.versionProvider(requestMessage.params)
+      ) {
+        requestMessage.reject(
+          new ResponseError(
+            ErrorCodes.RequestCancelled,
+            'Request got cancelled'
+          )
+        )
         return
       }
       let result = elem.handler(requestMessage.params, requestMessage.token)
       if (Thenable.is(result)) {
-        result.then(value => {
-          requestMessage.resolve(value)
-        }, error => {
-          requestMessage.reject(error)
-        })
+        result.then(
+          value => {
+            requestMessage.resolve(value)
+          },
+          error => {
+            requestMessage.reject(error)
+          }
+        )
       } else {
         requestMessage.resolve(result)
       }
     } else {
       let notificationMessage = message
       let elem = this.notificationHandlers.get(notificationMessage.method)
-      if (elem.versionProvider && notificationMessage.documentVersion !== void 0 && notificationMessage.documentVersion !== elem.versionProvider(notificationMessage.params)) {
+      if (
+        elem.versionProvider &&
+        notificationMessage.documentVersion !== void 0 &&
+        notificationMessage.documentVersion !==
+          elem.versionProvider(notificationMessage.params)
+      ) {
         return
       }
       elem.handler(notificationMessage.params)
@@ -547,22 +699,36 @@ class BufferedMessageQueue {
 let messageQueue: BufferedMessageQueue = new BufferedMessageQueue(connection)
 
 namespace ValidateNotification {
-  export const type: NotificationType<TextDocument, void> = new NotificationType<TextDocument, void>('eslint/validate')
+  export const type: NotificationType<
+    TextDocument,
+    void
+  > = new NotificationType<TextDocument, void>('eslint/validate')
 }
 
-messageQueue.onNotification(ValidateNotification.type, document => {
-  validateSingle(document, true)
-}, (document): number => {
-  return document.version
-})
+messageQueue.onNotification(
+  ValidateNotification.type,
+  document => {
+    validateSingle(document, true)
+  },
+  (document): number => {
+    return document.version
+  }
+)
 
 // The documents manager listen for text document create, change
 // and close on the connection
 documents.listen(connection)
 documents.onDidOpen(event => {
   resolveSettings(event.document).then(settings => {
+    if (!settings.validate) {
+      return
+    }
     if (settings.run === 'onSave') {
-      messageQueue.addNotificationMessage(ValidateNotification.type, event.document, event.document.version)
+      messageQueue.addNotificationMessage(
+        ValidateNotification.type,
+        event.document,
+        event.document.version
+      )
     }
   })
 })
@@ -570,34 +736,96 @@ documents.onDidOpen(event => {
 // A text document has changed. Validate the document according the run setting.
 documents.onDidChangeContent(event => {
   resolveSettings(event.document).then(settings => {
-    if (settings.run !== 'onType') {
+    if (!settings.validate || settings.run !== 'onType') {
       return
     }
-    messageQueue.addNotificationMessage(ValidateNotification.type, event.document, event.document.version)
+    messageQueue.addNotificationMessage(
+      ValidateNotification.type,
+      event.document,
+      event.document.version
+    )
+  })
+})
+
+function getFixes(textDocument: TextDocument): TextEdit[] {
+  let uri = textDocument.uri
+  let edits = codeActions.get(uri)
+  function createTextEdit(editInfo: AutoFix): TextEdit {
+    return TextEdit.replace(
+      Range.create(
+        textDocument.positionAt(editInfo.edit.range[0]),
+        textDocument.positionAt(editInfo.edit.range[1])
+      ),
+      editInfo.edit.text || ''
+    )
+  }
+  if (edits) {
+    let fixes = new Fixes(edits)
+    if (
+      fixes.isEmpty() ||
+      textDocument.version !== fixes.getDocumentVersion()
+    ) {
+      return []
+    }
+    return fixes.getOverlapFree().map(createTextEdit)
+  }
+  return []
+}
+
+documents.onWillSaveWaitUntil(event => {
+  if (event.reason === TextDocumentSaveReason.AfterDelay) {
+    return []
+  }
+
+  let document = event.document
+  return resolveSettings(document).then(settings => {
+    if (!settings.autoFixOnSave) {
+      return []
+    }
+    // If we validate on save and want to apply fixes on will save
+    // we need to validate the file.
+    if (settings.run === 'onSave') {
+      // Do not queue this since we want to get the fixes as fast as possible.
+      return validateSingle(document, false).then(() => getFixes(document))
+    } else {
+      return getFixes(document)
+    }
   })
 })
 
 // A text document has been saved. Validate the document according the run setting.
 documents.onDidSave(event => {
   resolveSettings(event.document).then(settings => {
-    if (settings.run !== 'onSave') {
+    if (!settings.validate || settings.run !== 'onSave') {
       return
     }
-    messageQueue.addNotificationMessage(ValidateNotification.type, event.document, event.document.version)
+    messageQueue.addNotificationMessage(
+      ValidateNotification.type,
+      event.document,
+      event.document.version
+    )
   })
 })
 
 documents.onDidClose(event => {
-  let uri = event.document.uri
-  document2Settings.delete(uri)
-  codeActions.delete(uri)
-  connection.sendDiagnostics({uri, diagnostics: []})
+  resolveSettings(event.document).then(settings => {
+    let uri = event.document.uri
+    document2Settings.delete(uri)
+    codeActions.delete(uri)
+    if (settings.validate) {
+      connection.sendDiagnostics({uri: uri, diagnostics: []})
+    }
+  })
 })
 
-function environmentChanged(): void {
+function environmentChanged() {
   document2Settings.clear()
   for (let document of documents.all()) {
-    messageQueue.addNotificationMessage(ValidateNotification.type, document, document.version)
+    messageQueue.addNotificationMessage(
+      ValidateNotification.type,
+      document,
+      document.version
+    )
   }
 }
 
@@ -611,13 +839,19 @@ connection.onInitialize(_params => {
       textDocumentSync: {
         openClose: true,
         change: TextDocumentSyncKind.Full,
+        willSaveWaitUntil: true,
         save: {
           includeText: false
         }
       },
       codeActionProvider: true,
       executeCommandProvider: {
-        commands: [CommandIds.applySingleFix, CommandIds.applySameFixes, CommandIds.applyAllFixes, CommandIds.applyAutoFix]
+        commands: [
+          CommandIds.applySingleFix,
+          CommandIds.applySameFixes,
+          CommandIds.applyAllFixes,
+          CommandIds.applyAutoFix
+        ]
       }
     }
   }
@@ -625,31 +859,55 @@ connection.onInitialize(_params => {
 
 connection.onInitialized(() => {
   connection.client.register(DidChangeConfigurationNotification.type, undefined)
+  connection.client.register(
+    DidChangeWorkspaceFoldersNotification.type,
+    undefined
+  )
 })
 
-messageQueue.registerNotification(DidChangeConfigurationNotification.type, _params => {
-  environmentChanged()
-})
+messageQueue.registerNotification(
+  DidChangeConfigurationNotification.type,
+  _params => {
+    environmentChanged()
+  }
+)
 
-const singleErrorHandlers: ((error: any, document: TextDocument, library: ESLintModule) => Status)[] = [
+messageQueue.registerNotification(
+  DidChangeWorkspaceFoldersNotification.type,
+  _params => {
+    environmentChanged()
+  }
+)
+
+const singleErrorHandlers: ((
+  error: any,
+  document: TextDocument,
+  library: ESLintModule
+) => Status)[] = [
   tryHandleNoConfig,
   tryHandleConfigError,
   tryHandleMissingModule,
   showErrorMessage
 ]
 
-function validateSingle(document: TextDocument, publishDiagnostics = true): Thenable<void> {
+function validateSingle(
+  document: TextDocument,
+  publishDiagnostics: boolean = true
+): Thenable<void> {
   // We validate document in a queue but open / close documents directly. So we need to deal with the
   // fact that a document might be gone from the server.
   if (!documents.get(document.uri)) {
     return Promise.resolve(undefined)
   }
   return resolveSettings(document).then(settings => {
+    if (!settings.validate) {
+      return
+    }
     try {
       validate(document, settings, publishDiagnostics)
       connection.sendNotification(StatusNotification.type, {state: Status.ok})
     } catch (err) {
-      let status
+      let status = undefined
       for (let handler of singleErrorHandlers) {
         status = handler(err, document, settings.library)
         if (status) {
@@ -664,26 +922,39 @@ function validateSingle(document: TextDocument, publishDiagnostics = true): Then
 
 function validateMany(documents: TextDocument[]): void {
   documents.forEach(document => {
-    messageQueue.addNotificationMessage(ValidateNotification.type, document, document.version)
+    messageQueue.addNotificationMessage(
+      ValidateNotification.type,
+      document,
+      document.version
+    )
   })
 }
 
 function getMessage(err: any, document: TextDocument): string {
   let result: string = null
   if (typeof err.message === 'string' || err.message instanceof String) {
-    result = err.message as string
+    result = <string>err.message
     result = result.replace(/\r?\n/g, ' ')
     if (/^CLI: /.test(result)) {
       result = result.substr(5)
     }
   } else {
-    result = `An unknown error occured while validating document: ${document.uri}`
+    result = `An unknown error occured while validating document: ${
+      document.uri
+    }`
   }
   return result
 }
 
-function validate(document: TextDocument, settings: TextDocumentSettings, publishDiagnostics = true): void {
-  let newOptions: CLIOptions = Object.assign(Object.create(null), settings.options)
+function validate(
+  document: TextDocument,
+  settings: TextDocumentSettings,
+  publishDiagnostics: boolean = true
+): void {
+  let newOptions: CLIOptions = Object.assign(
+    Object.create(null),
+    settings.options
+  )
   let content = document.getText()
   let uri = document.uri
   let file = getFilePath(document)
@@ -696,7 +967,14 @@ function validate(document: TextDocument, settings: TextDocumentSettings, publis
         if (settings.workingDirectory.changeProcessCWD) {
           process.chdir(settings.workingDirectory.directory)
         }
-      } else if (!isUNC(file)) {
+      } else if (settings.workspaceFolder) {
+        let workspaceFolderUri = URI.parse(settings.workspaceFolder.uri)
+        if (workspaceFolderUri.scheme === 'file') {
+          const fsPath = getFileSystemPath(workspaceFolderUri)
+          newOptions.cwd = fsPath
+          process.chdir(fsPath)
+        }
+      } else if (!settings.workspaceFolder && !isUNC(file)) {
         let directory = path.dirname(file)
         if (directory) {
           if (path.isAbsolute(directory)) {
@@ -705,17 +983,18 @@ function validate(document: TextDocument, settings: TextDocumentSettings, publis
         }
       }
     }
-    if (settings.library.CLIEngine == null) {
-      console.error('eslint module not found')
-      return
-    }
 
     let cli = new settings.library.CLIEngine(newOptions)
     // Clean previously computed code actions.
     codeActions.delete(uri)
     let report: ESLintReport = cli.executeOnText(content, file)
     let diagnostics: Diagnostic[] = []
-    if (report && report.results && Array.isArray(report.results) && report.results.length > 0) {
+    if (
+      report &&
+      report.results &&
+      Array.isArray(report.results) &&
+      report.results.length > 0
+    ) {
       let docReport = report.results[0]
       if (docReport.messages && Array.isArray(docReport.messages)) {
         docReport.messages.forEach(problem => {
@@ -739,37 +1018,51 @@ function validate(document: TextDocument, settings: TextDocumentSettings, publis
   }
 }
 
-let noConfigReported: Map<string, ESLintModule> = new Map<string, ESLintModule>()
+let noConfigReported: Map<string, ESLintModule> = new Map<
+  string,
+  ESLintModule
+>()
 
 function isNoConfigFoundError(error: any): boolean {
   let candidate = error as ESLintError
-  return candidate.messageTemplate === 'no-config-found' || candidate.message === 'No ESLint configuration found.'
+  return (
+    candidate.messageTemplate === 'no-config-found' ||
+    candidate.message === 'No ESLint configuration found.'
+  )
 }
 
-function tryHandleNoConfig(error: any, document: TextDocument, library: ESLintModule): Status {
+function tryHandleNoConfig(
+  error: any,
+  document: TextDocument,
+  library: ESLintModule
+): Status {
   if (!isNoConfigFoundError(error)) {
     return undefined
   }
   if (!noConfigReported.has(document.uri)) {
-    connection.sendRequest(
-      NoConfigRequest.type,
-      {
+    connection
+      .sendRequest(NoConfigRequest.type, {
         message: getMessage(error, document),
         document: {
           uri: document.uri
         }
       })
-      .then(undefined, () => {
-        // noop
-      })
+      .then(undefined, () => {})
     noConfigReported.set(document.uri, library)
   }
   return Status.warn
 }
 
-let configErrorReported: Map<string, ESLintModule> = new Map<string, ESLintModule>()
+let configErrorReported: Map<string, ESLintModule> = new Map<
+  string,
+  ESLintModule
+>()
 
-function tryHandleConfigError(error: any, document: TextDocument, library: ESLintModule): Status {
+function tryHandleConfigError(
+  error: any,
+  document: TextDocument,
+  library: ESLintModule
+): Status {
   if (!error.message) {
     return undefined
   }
@@ -785,7 +1078,9 @@ function tryHandleConfigError(error: any, document: TextDocument, library: ESLin
     return Status.warn
   }
 
-  let matches = /Cannot read config file:\s+(.*)\nError:\s+(.*)/.exec(error.message)
+  let matches = /Cannot read config file:\s+(.*)\nError:\s+(.*)/.exec(
+    error.message
+  )
   if (matches && matches.length === 3) {
     return handleFileName(matches[1])
   }
@@ -795,7 +1090,9 @@ function tryHandleConfigError(error: any, document: TextDocument, library: ESLin
     return handleFileName(matches[1])
   }
 
-  matches = /Cannot find module '([^']*)'\nReferenced from:\s+(.*)/.exec(error.message)
+  matches = /Cannot find module '([^']*)'\nReferenced from:\s+(.*)/.exec(
+    error.message
+  )
   if (matches && matches.length === 3) {
     return handleFileName(matches[2])
   }
@@ -803,40 +1100,59 @@ function tryHandleConfigError(error: any, document: TextDocument, library: ESLin
   return undefined
 }
 
-let missingModuleReported: Map<string, ESLintModule> = new Map<string, ESLintModule>()
+let missingModuleReported: Map<string, ESLintModule> = new Map<
+  string,
+  ESLintModule
+>()
 
-function tryHandleMissingModule(error: any, document: TextDocument, library: ESLintModule): Status {
+function tryHandleMissingModule(
+  error: any,
+  document: TextDocument,
+  library: ESLintModule
+): Status {
   if (!error.message) {
     return undefined
   }
 
-  function handleMissingModule(plugin: string, module: string, error: ESLintError): Status {
+  function handleMissingModule(
+    plugin: string,
+    module: string,
+    error: ESLintError
+  ): Status {
     if (!missingModuleReported.has(plugin)) {
       let fsPath = getFilePath(document)
       missingModuleReported.set(plugin, library)
       if (error.messageTemplate === 'plugin-missing') {
-        connection.console.error([
-          '',
-          `${error.message.toString()}`,
-          `Happened while validating ${fsPath ? fsPath : document.uri}`,
-          `This can happen for a couple of reasons:`,
-          `1. The plugin name is spelled incorrectly in an ESLint configuration file (e.g. .eslintrc).`,
-          `2. If ESLint is installed globally, then make sure ${module} is installed globally as well.`,
-          `3. If ESLint is installed locally, then ${module} isn't installed correctly.`,
-          '',
-          `Consider running eslint --debug ${fsPath ? fsPath : document.uri} from a terminal to obtain a trace about the configuration files used.`
-        ].join('\n'))
+        connection.console.error(
+          [
+            '',
+            `${error.message.toString()}`,
+            `Happened while validating ${fsPath ? fsPath : document.uri}`,
+            `This can happen for a couple of reasons:`,
+            `1. The plugin name is spelled incorrectly in an ESLint configuration file (e.g. .eslintrc).`,
+            `2. If ESLint is installed globally, then make sure ${module} is installed globally as well.`,
+            `3. If ESLint is installed locally, then ${module} isn't installed correctly.`,
+            '',
+            `Consider running eslint --debug ${
+              fsPath ? fsPath : document.uri
+            } from a terminal to obtain a trace about the configuration files used.`
+          ].join('\n')
+        )
       } else {
-        connection.console.error([
-          `${error.message.toString()}`,
-          `Happend while validating ${fsPath ? fsPath : document.uri}`
-        ].join('\n'))
+        connection.console.error(
+          [
+            `${error.message.toString()}`,
+            `Happend while validating ${fsPath ? fsPath : document.uri}`
+          ].join('\n')
+        )
       }
     }
     return Status.warn
   }
 
-  let matches = /Failed to load plugin (.*): Cannot find module (.*)/.exec(error.message)
+  let matches = /Failed to load plugin (.*): Cannot find module (.*)/.exec(
+    error.message
+  )
   if (matches && matches.length === 3) {
     return handleMissingModule(matches[1], matches[2], error)
   }
@@ -845,7 +1161,12 @@ function tryHandleMissingModule(error: any, document: TextDocument, library: ESL
 }
 
 function showErrorMessage(error: any, document: TextDocument): Status {
-  connection.window.showErrorMessage(`ESLint: ${getMessage(error, document)}.`)
+  connection.window.showErrorMessage(
+    `ESLint: ${getMessage(
+      error,
+      document
+    )}. Please see the 'ESLint' output channel for details.`
+  )
   if (Is.string(error.stack)) {
     connection.console.error('ESLint stack trace:')
     connection.console.error(error.stack)
@@ -853,36 +1174,36 @@ function showErrorMessage(error: any, document: TextDocument): Status {
   return Status.error
 }
 
-messageQueue.registerNotification(DidChangeWatchedFilesNotification.type, params => {
-  // A .eslintrc has change. No smartness here.
-  // Simply revalidate all file.
-  noConfigReported = new Map<string, ESLintModule>()
-  missingModuleReported = new Map<string, ESLintModule>()
-  params.changes.forEach(change => {
-    let fsPath = getFilePath(change.uri)
-    if (!fsPath || isUNC(fsPath)) {
-      return
-    }
-    let dirname = path.dirname(fsPath)
-    if (dirname) {
-      let library = configErrorReported.get(fsPath)
-      if (library) {
-        let cli = new library.CLIEngine({})
-        try {
-          cli.executeOnText('', path.join(dirname, '___test___.js'))
-          configErrorReported.delete(fsPath)
-        } catch (error) {
-          // noop
+messageQueue.registerNotification(
+  DidChangeWatchedFilesNotification.type,
+  params => {
+    // A .eslintrc has change. No smartness here.
+    // Simply revalidate all file.
+    noConfigReported = new Map<string, ESLintModule>()
+    missingModuleReported = new Map<string, ESLintModule>()
+    params.changes.forEach(change => {
+      let fsPath = getFilePath(change.uri)
+      if (!fsPath || isUNC(fsPath)) {
+        return
+      }
+      let dirname = path.dirname(fsPath)
+      if (dirname) {
+        let library = configErrorReported.get(fsPath)
+        if (library) {
+          let cli = new library.CLIEngine({})
+          try {
+            cli.executeOnText('', path.join(dirname, '___test___.js'))
+            configErrorReported.delete(fsPath)
+          } catch (error) {}
         }
       }
-    }
-  })
-  validateMany(documents.all())
-})
+    })
+    validateMany(documents.all())
+  }
+)
 
 class Fixes {
-  constructor(private edits: Map<string, AutoFix>) {
-  }
+  constructor(private edits: Map<string, AutoFix>) {}
 
   public static overlaps(lastEdit: AutoFix, newEdit: AutoFix): boolean {
     return !!lastEdit && lastEdit.edit.range[1] > newEdit.edit.range[0]
@@ -949,98 +1270,115 @@ class Fixes {
 }
 
 let commands: Map<string, WorkspaceChange>
-messageQueue.registerRequest(CodeActionRequest.type, params => {
-  commands = new Map<string, WorkspaceChange>()
-  let result: CodeAction[] = []
-  let uri = params.textDocument.uri
-  let edits = codeActions.get(uri)
-  if (!edits) {
+messageQueue.registerRequest(
+  CodeActionRequest.type,
+  params => {
+    commands = new Map<string, WorkspaceChange>()
+    let result: CodeAction[] = []
+    let uri = params.textDocument.uri
+    let edits = codeActions.get(uri)
+    if (!edits) {
+      return result
+    }
+
+    let fixes = new Fixes(edits)
+    if (fixes.isEmpty()) {
+      return result
+    }
+
+    let textDocument = documents.get(uri)
+    let documentVersion: number = -1
+    let ruleId: string
+
+    function createTextEdit(editInfo: AutoFix): TextEdit {
+      return TextEdit.replace(
+        Range.create(
+          textDocument.positionAt(editInfo.edit.range[0]),
+          textDocument.positionAt(editInfo.edit.range[1])
+        ),
+        editInfo.edit.text || ''
+      )
+    }
+
+    function getLastEdit(array: AutoFix[]): AutoFix {
+      let length = array.length
+      if (length === 0) {
+        return undefined
+      }
+      return array[length - 1]
+    }
+
+    for (let editInfo of fixes.getScoped(params.context.diagnostics)) {
+      documentVersion = editInfo.documentVersion
+      ruleId = editInfo.ruleId
+      let workspaceChange = new WorkspaceChange()
+      workspaceChange
+        .getTextEditChange({uri, version: documentVersion})
+        .add(createTextEdit(editInfo))
+      commands.set(CommandIds.applySingleFix, workspaceChange)
+      result.push(
+        CodeAction.create(
+          editInfo.label,
+          Command.create(editInfo.label, CommandIds.applySingleFix),
+          CodeActionKind.QuickFix
+        )
+      )
+    }
+
+    if (result.length > 0) {
+      let same: AutoFix[] = []
+      let all: AutoFix[] = []
+
+      for (let editInfo of fixes.getAllSorted()) {
+        if (documentVersion === -1) {
+          documentVersion = editInfo.documentVersion
+        }
+        if (
+          editInfo.ruleId === ruleId &&
+          !Fixes.overlaps(getLastEdit(same), editInfo)
+        ) {
+          same.push(editInfo)
+        }
+        if (!Fixes.overlaps(getLastEdit(all), editInfo)) {
+          all.push(editInfo)
+        }
+      }
+      if (same.length > 1) {
+        let sameFixes: WorkspaceChange = new WorkspaceChange()
+        let sameTextChange = sameFixes.getTextEditChange({
+          uri,
+          version: documentVersion
+        })
+        same.map(createTextEdit).forEach(edit => sameTextChange.add(edit))
+        commands.set(CommandIds.applySameFixes, sameFixes)
+        let title = `Fix all ${ruleId} problems`
+        let command = Command.create(title, CommandIds.applySameFixes)
+        result.push(CodeAction.create(title, command, CodeActionKind.QuickFix))
+      }
+      if (all.length > 1) {
+        let allFixes: WorkspaceChange = new WorkspaceChange()
+        let allTextChange = allFixes.getTextEditChange({
+          uri,
+          version: documentVersion
+        })
+        all.map(createTextEdit).forEach(edit => allTextChange.add(edit))
+        commands.set(CommandIds.applyAllFixes, allFixes)
+        let title = `Fix all auto-fixable problems`
+        let command = Command.create(title, CommandIds.applyAllFixes)
+        result.push(CodeAction.create(title, command, CodeActionKind.QuickFix))
+      }
+    }
     return result
+  },
+  (params): number => {
+    let document = documents.get(params.textDocument.uri)
+    return document ? document.version : undefined
   }
+)
 
-  let fixes = new Fixes(edits)
-  if (fixes.isEmpty()) {
-    return result
-  }
-
-  let textDocument = documents.get(uri)
-  let documentVersion = -1
-  let ruleId: string
-
-  function createTextEdit(editInfo: AutoFix): TextEdit {
-    return TextEdit.replace(Range.create(textDocument.positionAt(editInfo.edit.range[0]), textDocument.positionAt(editInfo.edit.range[1])), editInfo.edit.text || '')
-  }
-
-  function getLastEdit(array: AutoFix[]): AutoFix {
-    let length = array.length
-    if (length === 0) {
-      return undefined
-    }
-    return array[length - 1]
-  }
-
-  for (let editInfo of fixes.getScoped(params.context.diagnostics)) {
-    documentVersion = editInfo.documentVersion
-    ruleId = editInfo.ruleId
-    let workspaceChange = new WorkspaceChange()
-    workspaceChange.getTextEditChange({uri, version: documentVersion}).add(createTextEdit(editInfo))
-    commands.set(CommandIds.applySingleFix, workspaceChange)
-    result.push(CodeAction.create(
-      editInfo.label,
-      Command.create(editInfo.label, CommandIds.applySingleFix),
-      CodeActionKind.QuickFix
-    ))
-  }
-
-  if (result.length > 0) {
-    let same: AutoFix[] = []
-    let all: AutoFix[] = []
-
-    for (let editInfo of fixes.getAllSorted()) {
-      if (documentVersion === -1) {
-        documentVersion = editInfo.documentVersion
-      }
-      if (editInfo.ruleId === ruleId && !Fixes.overlaps(getLastEdit(same), editInfo)) {
-        same.push(editInfo)
-      }
-      if (!Fixes.overlaps(getLastEdit(all), editInfo)) {
-        all.push(editInfo)
-      }
-    }
-    if (same.length > 1) {
-      let sameFixes: WorkspaceChange = new WorkspaceChange()
-      let sameTextChange = sameFixes.getTextEditChange({uri, version: documentVersion})
-      same.map(createTextEdit).forEach(edit => sameTextChange.add(edit))
-      commands.set(CommandIds.applySameFixes, sameFixes)
-      let title = `Fix all ${ruleId} problems`
-      let command = Command.create(title, CommandIds.applySameFixes)
-      result.push(CodeAction.create(
-        title,
-        command,
-        CodeActionKind.QuickFix
-      ))
-    }
-    if (all.length > 1) {
-      let allFixes: WorkspaceChange = new WorkspaceChange()
-      let allTextChange = allFixes.getTextEditChange({uri, version: documentVersion})
-      all.map(createTextEdit).forEach(edit => allTextChange.add(edit))
-      commands.set(CommandIds.applyAllFixes, allFixes)
-      let title = `Fix all auto-fixable problems`
-      let command = Command.create(title, CommandIds.applyAllFixes)
-      result.push(CodeAction.create(
-        title,
-        command,
-        CodeActionKind.QuickFix
-      ))
-    }
-  }
-  return result
-}, (params): number => {
-  let document = documents.get(params.textDocument.uri)
-  return document ? document.version : undefined
-})
-
-function computeAllFixes(identifier: VersionedTextDocumentIdentifier): TextEdit[] {
+function computeAllFixes(
+  identifier: VersionedTextDocumentIdentifier
+): TextEdit[] {
   let uri = identifier.uri
   let textDocument = documents.get(uri)
   if (!textDocument || identifier.version !== textDocument.version) {
@@ -1048,7 +1386,13 @@ function computeAllFixes(identifier: VersionedTextDocumentIdentifier): TextEdit[
   }
   let edits = codeActions.get(uri)
   function createTextEdit(editInfo: AutoFix): TextEdit {
-    return TextEdit.replace(Range.create(textDocument.positionAt(editInfo.edit.range[0]), textDocument.positionAt(editInfo.edit.range[1])), editInfo.edit.text || '')
+    return TextEdit.replace(
+      Range.create(
+        textDocument.positionAt(editInfo.edit.range[0]),
+        textDocument.positionAt(editInfo.edit.range[1])
+      ),
+      editInfo.edit.text || ''
+    )
   }
 
   if (edits) {
@@ -1060,39 +1404,45 @@ function computeAllFixes(identifier: VersionedTextDocumentIdentifier): TextEdit[
   return undefined
 }
 
-messageQueue.registerRequest(ExecuteCommandRequest.type, params => {
-  let workspaceChange: WorkspaceChange
-  if (params.command === CommandIds.applyAutoFix) {
-    let identifier: VersionedTextDocumentIdentifier = params.arguments[0]
-    let edits = computeAllFixes(identifier)
-    if (edits) {
-      workspaceChange = new WorkspaceChange()
-      let textChange = workspaceChange.getTextEditChange(identifier)
-      edits.forEach(edit => textChange.add(edit))
+messageQueue.registerRequest(
+  ExecuteCommandRequest.type,
+  params => {
+    let workspaceChange: WorkspaceChange
+    if (params.command === CommandIds.applyAutoFix) {
+      let identifier: VersionedTextDocumentIdentifier = params.arguments[0]
+      let edits = computeAllFixes(identifier)
+      if (edits) {
+        workspaceChange = new WorkspaceChange()
+        let textChange = workspaceChange.getTextEditChange(identifier)
+        edits.forEach(edit => textChange.add(edit))
+      }
+    } else {
+      workspaceChange = commands.get(params.command)
     }
-  } else {
-    workspaceChange = commands.get(params.command)
-  }
 
-  if (!workspaceChange) {
-    return {}
-  }
-  return connection.workspace.applyEdit(workspaceChange.edit).then(response => {
-    if (!response.applied) {
-      connection.console.error(`Failed to apply command: ${params.command}`)
+    if (!workspaceChange) {
+      return {}
     }
-    return {}
-  }, () => {
-    connection.console.error(`Failed to apply command: ${params.command}`)
-  })
-}, (params): number => {
-  if (params.command === CommandIds.applyAutoFix) {
-    let identifier: VersionedTextDocumentIdentifier = params.arguments[0]
-    return identifier.version
-  } else {
-    return undefined
+    return connection.workspace.applyEdit(workspaceChange.edit).then(
+      response => {
+        if (!response.applied) {
+          connection.console.error(`Failed to apply command: ${params.command}`)
+        }
+        return {}
+      },
+      () => {
+        connection.console.error(`Failed to apply command: ${params.command}`)
+      }
+    )
+  },
+  (params): number => {
+    if (params.command === CommandIds.applyAutoFix) {
+      let identifier: VersionedTextDocumentIdentifier = params.arguments[0]
+      return identifier.version
+    } else {
+      return undefined
+    }
   }
-})
+)
 
-connection.tracer.attach(connection)
-connection.listen()
+connection.tracer.connection.listen()
