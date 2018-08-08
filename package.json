@@ -1,6 +1,6 @@
 {
   "name": "eslint-server",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "language server for eslint",
   "main": "lib/index.js",
   "keywords": [
@@ -19,12 +19,12 @@
   "devDependencies": {
     "@chemzqm/tsconfig": "^0.0.2",
     "@chemzqm/tslint-config": "^1.0.15",
-    "@types/node": "^10.5.3",
+    "@types/node": "^10.5.7",
     "rimraf": "^2.6.2",
-    "typescript": "^2.9.2"
+    "typescript": "^3.0.1"
   },
   "dependencies": {
-    "eslint": "^5.2.0",
+    "eslint": "^5.3.0",
     "tslib": "^1.9.3",
     "vscode-languageserver": "^4.4.0",
     "vscode-uri": "^1.0.5"
