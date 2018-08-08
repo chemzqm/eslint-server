@@ -378,6 +378,8 @@ process.on('uncaughtException', (error: any) => {
 })
 
 let connection = createConnection()
+console.log = connection.console.log.bind(connection.console)
+console.error = connection.console.error.bind(connection.console)
 let documents: TextDocuments = new TextDocuments()
 
 let _globalNpmPath: string | null | undefined
@@ -859,10 +861,10 @@ connection.onInitialize(_params => {
 
 connection.onInitialized(() => {
   connection.client.register(DidChangeConfigurationNotification.type, undefined)
-  connection.client.register(
-    DidChangeWorkspaceFoldersNotification.type,
-    undefined
-  )
+  // connection.client.register(
+  //   DidChangeWorkspaceFoldersNotification.type,
+  //   undefined
+  // )
 })
 
 messageQueue.registerNotification(
@@ -872,12 +874,12 @@ messageQueue.registerNotification(
   }
 )
 
-messageQueue.registerNotification(
-  DidChangeWorkspaceFoldersNotification.type,
-  _params => {
-    environmentChanged()
-  }
-)
+// messageQueue.registerNotification(
+//   DidChangeWorkspaceFoldersNotification.type,
+//   _params => {
+//     environmentChanged()
+//   }
+// )
 
 const singleErrorHandlers: ((
   error: any,
@@ -1269,7 +1271,7 @@ class Fixes {
   }
 }
 
-let commands: Map<string, WorkspaceChange>
+let commands: Map<string, WorkspaceChange> = new Map()
 messageQueue.registerRequest(
   CodeActionRequest.type,
   params => {
